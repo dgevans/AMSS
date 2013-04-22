@@ -55,6 +55,8 @@ class parameters(object):
 
     nx = 20
 
+    cloud = False
+
 
 class DictWrap(object):
     """ Wrap an existing dict, or create a new one, and access with either dot
