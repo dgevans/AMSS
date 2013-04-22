@@ -4,9 +4,12 @@ from Spline import Spline
 from scipy.optimize import fmin_slsqp
 from parameters import DictWrap
 import cloud
+import multiprocessing
 from multiprocessing import Pool
 from functools import partial
+import itertools
 
+#Holds value function truly it actually fits the certain consumption equivalent as that will be closer to linear
 class ValueFunctionSpline:
     def __init__(self,X,y,k,sigma,beta):
         self.sigma = sigma
@@ -39,69 +42,81 @@ class ValueFunctionSpline:
         raise Exception('Error: d must equal None or 1')
 
 
-def iterateBellman(Vf,c_policy,xprime_policy,Para):
-
-    p = Pool(2)
+#for a given state x and s_ solves value function problem. returns polcies and objective
+def findPolicies(x_s_,Vf,c_policy,xprime_policy,Para):
     S = Para.P.shape[0]
-
-    xbounds = []
-    cbounds = []
+    bounds = [(0,10)]*S+[(Para.xmin,Para.xmax)]*S
+    x = x_s_[0]
+    s_ = x_s_[1]
+    state = DictWrap({'x': x,'s':s_})
+    z0 = np.zeros(2*S)
     for s in range(0,S):
-        xbounds.append((Para.xmin,Para.xmax))
-        cbounds.append((0,10))
-    bounds = cbounds+xbounds
+        z0[s] = c_policy[(s_,s)](x)
+        z0[S+s] = xprime_policy[(s_,s)](x)
+    (policy,minusv,_,imode,smode) = fmin_slsqp(objectiveFunction,z0,f_ieqcons=impCon,bounds=bounds,fprime=objectiveFunctionJac,fprime_ieqcons=impConJac,args=(Vf,Para,state),iprint=False,full_output=True,acc=1e-10,iter=10000)
+    if imode != 0:
+        raise Exception(smode)
+    return policy[0:S],policy[S:2*S],-minusv
 
+def findPoliciesOnGrid(x_s_grid,Vf,c_policy,xprime_policy,Para,ncpu=None):
+    """
+    Solves for the optimal policies on the grid of states x_s_grid.  Will use muliple cores locally if desired
 
-
-    if(Para.cloud):
-        jids = cloud.map(iterateOn_s,range(0,S),_env='gspy_env')
-        [c_new,xprime_new,V_new] = zip(*cloud.result(jids))
+    """
+    findPolicies_partial = partial(findPolicies,Vf=Vf,c_policy=c_policy,xprime_policy=xprime_policy,Para=Para)
+    if ncpu==None:
+        ncpu = multiprocessing.cpu_count()
+    if ncpu>1:
+        p = Pool(ncpu)
+        return p.map(findPolicies_partial,x_s_grid,len(x_s_grid)/ncpu)
     else:
-        iterateOn_s_partial = partial(iterateOn_s,Vf=Vf,c_policy=c_policy,xprime_policy=xprime_policy,bounds=bounds,Para=Para)
-        [c_new,xprime_new,V_new] = zip(*map(iterateOn_s_partial,range(0,S)))
-        #[c_new,xprime_new,V_new] = zip(*p.map(iterateOn_s,range(0,S)))
+        return map(findPolicies_partial,x_s_grid)
+
+
+def iterateBellmanLocally(Vf,c_policy,xprime_policy,Para):
+    """
+     Iterates the bellman equation locally returns policy function Vf,c_policy,xprime_policy
+    """
+    S = Para.P.shape[0]
+    policies = findPoliciesOnGrid(Para.domain,Vf,c_policy,xprime_policy,Para)
+
+    return fitPolicies(policies,Vf,c_policy,xprime_policy,Para)
+
+def iterateBellmanOnCloud(Vf,c_policy,xprime_policy,Para,nCloud = 10):
+    """
+    Iterates Bellman equation on cloud, return policy functions Vf,c_policy,xprime_policy
+    """
+    nxs = len(Para.domain)
+    n = nxs/nCloud
+    domain_chunks = [Para.domain[i:i+n] for i in range(0,nxs,n)] #Break Para.domain into chunks to work on in cloud
+
+    #solve optimization on cloud
+    jids = cloud.map(lambda x_s_grid: findPoliciesOnGrid(x_s_grid,Vf,c_policy,xprime_policy,Para,ncpu=2)
+        ,domain_chunks,_env='gspy_env',_type='f2')
+    chunked_policies = cloud.result(jids)
+    policies = list(itertools.chain.from_iterable(chunked_policies)) #collapse polcies into one list
+
+    return fitPolicies(policies,Vf,c_policy,xprime_policy,Para) #fit policy functions from policy list
+
+def fitPolicies(policies,Vf,c_policy,xprime_policy,Para):
+    """
+    Given the new policies fits a new value function and policy functions.
+    """
+    S = Para.P.shape[0]
+    policies = [policies[i:i+Para.nx] for i in range(0,len(policies),Para.nx)] #split policies up into groups by S
     for s_ in range(0,S):
-        Vf[s_].fit(Para.xgrid,V_new[s_][:],[2])
+        [c_new,xprime_new,V_new] = zip(*policies[s_]) #unzip the list of tuples into the c,xprime policies and associated values
+        Vf[s_].fit(Para.xgrid,np.hstack(V_new)[:],[2])
         for s in range(0,S):
-            c_policy[(s_,s)].fit(Para.xgrid,c_new[s_][:,s],[1])
-            xprime_policy[(s_,s)].fit(Para.xgrid,xprime_new[s_][:,s],[1])
+            c_policy[(s_,s)].fit(Para.xgrid,np.vstack(c_new)[:,s],[1]) #vstack is used here because c_new is really a list of arrays
+            xprime_policy[(s_,s)].fit(Para.xgrid,np.vstack(xprime_new)[:,s],[1])
 
     return Vf,c_policy,xprime_policy
 
-def iterateOn_s(s_,Vf,c_policy,xprime_policy,bounds,Para):
-    nsplit = 1
-    if Para.cloud and nsplit >1:
-        jids = cloud.map(lambda xgrid: iterateOnGrid(xgrid,s_,Vf,c_policy,xprime_policy,bounds,Para)
-            ,np.split(Para.xgrid,nsplit),_env='gspy_env')
-        [c,xprime,V] = zip(*cloud.result(jids))
-    else:
-        iterateOnGrid_partial = partial(iterateOnGrid,s_=s_,Vf=Vf,c_policy=c_policy,xprime_policy=xprime_policy,bounds=bounds,Para=Para)
-        [c,xprime,V] = zip(*map(iterateOnGrid_partial
-            ,np.split(Para.xgrid,nsplit))) #unzip the map results in to c,xprime,V
-    return (np.vstack(c),np.vstack(xprime),np.hstack(V))
-
-
-def iterateOnGrid(xgrid,s_,Vf,c_policy,xprime_policy,bounds,Para):
-    S = Para.P.shape[0]
-    c_new = []
-    xprime_new = []
-    V_new = []
-    for x in xgrid:
-        state = DictWrap({'x': x,'s':s_})
-        z0 = np.zeros(2*S)
-        for s in range(0,S):
-            z0[s] = c_policy[(s_,s)](x)
-            z0[S+s] = xprime_policy[(s_,s)](x)
-        (policy,minusv,_,imode,smode) = fmin_slsqp(objectiveFunction,z0,f_ieqcons=impCon,bounds=bounds,fprime=objectiveFunctionJac,fprime_ieqcons=impConJac,args=(Vf,Para,state),iprint=False,full_output=True,acc=1e-10,iter=10000)
-        if imode != 0:
-            print smode
-            exit()
-        c_new.append( policy[0:S] )
-        xprime_new.append(policy[S:2*S])
-        V_new.append(-minusv)
-    return c_new,xprime_new,V_new
-
 def objectiveFunction(z,V,Para,state):
+    """
+    Computes the objective function to be optimized.  z is [c,xprime]
+    """
     u = Para.U.u
     P = Para.P
 
@@ -118,6 +133,9 @@ def objectiveFunction(z,V,Para,state):
     return -np.dot(P[state.s,:], u(c,l,Para) + Para.beta*Vprime )
 
 def objectiveFunctionJac(z,V,Para,state):
+    """
+    Computes the derivative of the objective function. z is [c,xprime]
+    """
     P = Para.P
 
     S = P.shape[0]
@@ -130,12 +148,15 @@ def objectiveFunctionJac(z,V,Para,state):
     ul = Para.U.ul(c,l,Para)
 
     for s in range(0,S):
-        dVprime[s] = V[s](xprime[s],1)
+        dVprime[s] = V[s](xprime[s],1)#the ,1 indicates a first derivative
 
-    return np.hstack((-P[state.s,:]*( uc+ul/Para.theta ),
-                       -P[state.s,:]*Para.beta*dVprime))
+    return np.hstack((-P[state.s,:]*( uc+ul/Para.theta ),#derivative w.r.t. c
+                       -P[state.s,:]*Para.beta*dVprime))#derivative w.r.t xprime
 
 def impCon(z,V,Para,state):
+    """
+    Computes the implementability constraint.
+    """
     x = state.x
     s_ = state.s
     P = Para.P
@@ -154,6 +175,9 @@ def impCon(z,V,Para,state):
     return c*uc + l*ul + xprime - x*uc/(beta*Euc)
 
 def impConJac(z,V,Para,state):
+    """
+    Computes the Jacobian of the implementability constraint
+    """
     x = state.x
     s_ = state.s
     P = Para.P
@@ -169,13 +193,18 @@ def impConJac(z,V,Para,state):
     ull = Para.U.ull(c,l,Para)
     Euc = np.dot(P[s_,:],uc)
 
-    JacI = np.diag( uc+ucc*c+(ul+ull*l)/theta )
-    JacXprime = np.eye(S)
+    JacI = np.diag( uc+ucc*c+(ul+ull*l)/theta ) #derivative of I = uc*c+ul*l w.r.t c
+    JacXprime = np.eye(S)  #derivative of xprime w.r.t xprime
+    #derivative of -x*uc/(beta Euc) w.r.t. c
     JacXterm = np.diag(-x*ucc/(beta*Euc)) + x*np.kron(uc.reshape(S,1),P[s_,:]*ucc.reshape(1,S))/(beta*Euc**2)
-    return np.hstack((JacI+JacXterm,JacXprime))
+    return np.hstack((JacI+JacXterm #derivative w.r.t c
+                      ,JacXprime)) #derivative w.r.t xprime
 
 
 def simulate(x0,T,xprime_policy,Para):
+    """
+    Simulates starting from x0 given xprime_policy for T periods.  Returns sequence of xprimes and shocks
+    """
     S = Para.P.shape[0]
     xHist = np.zeros(T)
     sHist = np.zeros(T,dtype=np.int)
@@ -193,34 +222,16 @@ def simulate(x0,T,xprime_policy,Para):
     return xHist,sHist
 
 def fitNewPolicies(xgrid,Vf,c_policy,xprime_policy,Para):
-
+    """
+    Fits new policies locally on a larger xgrid
+    """
     S = Para.P.shape[0]
-    nx = xgrid.shape[0]
-    c_new = np.zeros((nx,S,S))
-    xprime_new = np.zeros((nx,S,S))
-    xbounds = []
-    cbounds = []
-    for s in range(0,S):
-        xbounds.append((Para.xmin,Para.xmax))
-        cbounds.append((0,10))
-    bounds = cbounds+xbounds
-    for s_ in range(0,S):
-        for ix in range(0,nx):
-            state = DictWrap({'x': xgrid[ix],'s':s_})
-            z0 = np.zeros(2*S)
-            for s in range(0,S):
-                z0[s] = c_policy[(s_,s)](state.x)
-                z0[S+s] = xprime_policy[(s_,s)](state.x)
-            (policy,_,_,imode,smode) = fmin_slsqp(objectiveFunction,z0,f_ieqcons=impCon,bounds=bounds,fprime=objectiveFunctionJac,fprime_ieqcons=impConJac,args=(Vf,Para,state),iprint=False,full_output=True,acc=1e-10,iter=1000)
+    Para.nx = xgrid.shape[0]
+    xDomain = np.kron(np.ones(S),Para.xgrid) #stack Para.xgrid S times
+    s_Domain = np.kron(range(0,S),np.ones(Para.nx,dtype=np.int)) #s assciated with each grid
+    Para.domain = zip(xDomain,s_Domain)#zip them together so we have something that looks like
 
-            c_new[ix,s_,:] = policy[0:S]
-            xprime_new[ix,s_,:] = policy[S:2*S]
-
-    for s_ in range(0,S):
-        for s in range(0,S):
-            c_policy[(s_,s)].fit(xgrid,c_new[:,s_,s],[1])
-            xprime_policy[(s_,s)].fit(xgrid,xprime_new[:,s_,s],[1])
-
+    c_policy,xprime_policy,_ =iterateBellmanLocally(Vf,c_policy,xprime_policy,Para)
     return c_policy,xprime_policy
 
 

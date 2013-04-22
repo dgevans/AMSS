@@ -20,25 +20,32 @@ def computeFB(Para):
 
     EucFB = Para.P.dot(ucFB)
 
-    xFB = np.kron(IFB,np.ones(S))/(np.kron(ucFB,1/(Para.beta*EucFB))-1)
+    xFB = np.kron(IFB,np.ones(S))/(np.kron(ucFB,1/(Para.beta*EucFB))-1) #compute x needed to attain FB while keeping x constant
     return cFB,xFB
 
 
 def setupGrid(Para):
     cFB,xFB = computeFB(Para)
-    Para.xmin = min(xFB)
-    Para.xgrid = np.linspace(Para.xmin,Para.xmax,Para.nx)
+    Para.xmin = min(xFB) #below xmin FB can be acheived
+    Para.xgrid = np.linspace(Para.xmin,Para.xmax,Para.nx) #linear grid points
+
+    S = Para.P.shape[0]
+    xDomain = np.kron(np.ones(S),Para.xgrid) #stack Para.xgrid S times
+    s_Domain = np.kron(range(0,S),np.ones(Para.nx,dtype=np.int)) #s assciated with each grid
+    Para.domain = zip(xDomain,s_Domain)#zip them together so we have something that looks like
+    #[(x1,1),(x2,1),...,(xn,1),(x1,2),...]
+
     return Para
 
 def initializeFunctions(Para):
-#Initializing using deterministic stationary equilibrium
+    #Initializing using deterministic stationary equilibrium but using interest rates comming from FB
     S = Para.P.shape[0]
     cFB,_ = computeFB(Para)
     lFB = (cFB+Para.g)/Para.theta
     ucFB = Para.U.uc(cFB,lFB,Para)
     EucFB = Para.P.dot(ucFB)
 
-    Q = np.zeros((S*S,S*S))
+    Q = np.zeros((S*S,S*S)) #full (s_,s) transition matrix
     for s_ in range(0,S):
         for s in range(0,S):
             Q[s_,s_*S+s] = Para.P[s_,s]
@@ -54,17 +61,20 @@ def initializeFunctions(Para):
             def stationaryRoot(c):
                 l = (c+Para.g)/Para.theta
                 return c*Para.U.uc(c,l,Para)+l*Para.U.ul(c,l,Para)+(1.0-ucFB/(Para.beta*EucFB[s_]))*x
-            c[i,s_,:] = root(stationaryRoot,cFB).x
+            c[i,s_,:] = root(stationaryRoot,cFB).x #find root that holds x constant
             xprime[i,:] = x*np.ones(S)
             for s in range(0,S):
-                c[i,s_,s] = min(c[i,s_,s],cFB[s])
+                c[i,s_,s] = min(c[i,s_,s],cFB[s])#if you can achieve FB do it
                 l = (c[i,s_,s]+Para.g[s])/Para.theta
                 u[s_,s] = Para.U.u(c[i,s_,s],l,Para)
+                #Compute xprime from implementability constraint
                 xprime[i,s_,s] = (c[i,s_,s]*Para.U.uc(c[i,s_,s],l,Para)+l*Para.U.ul(c[i,s_,s],l,Para)+x)*Para.beta*EucFB[s_]/ucFB[s]
         for s_ in range(0,S):
+            #compute Value using transition matricies.  Gives rough guess on value function
             v = np.linalg.solve(np.eye(S*S) - Para.beta*Q,u.reshape(S*S))
             V[i,s_] = Para.P[s_,:].dot(v[s_*S:(s_+1)*S])
 
+    #Fit functions using splines.  Linear for policies as they can be wonky
     Vf = []
     c_policy = {}
     xprime_policy = {}
