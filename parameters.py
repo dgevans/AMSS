@@ -1,6 +1,27 @@
 __author__ = 'dgevans'
 import numpy as np
 
+class UQL(object):
+    @staticmethod
+    def u(c,l,Para):
+        gamma = Para.gamma
+        return c-l**(1+gamma)/(1+gamma)
+
+    @staticmethod
+    def uc(c,l,Para):
+        return np.ones(c.shape)
+
+    @staticmethod
+    def ul(c,l,Para):
+        return -l**(Para.gamma)
+
+    @staticmethod
+    def ucc(c,l,Para):
+        return np.zeros(c.shape)
+
+    @staticmethod
+    def ull(c,l,Para):
+        return -Para.gamma*l**(Para.gamma-1)
 
 class UCES(object):
     @staticmethod
@@ -29,6 +50,41 @@ class UCES(object):
     def ull(c,l,Para):
         return -Para.gamma*l**(Para.gamma-1)
 
+class UCES_AMSS(object):
+    @staticmethod
+    def u(c,l,Para):
+        sigma_1 = Para.sigma_1
+        sigma_2 = Para.sigma_2
+        eta = Para.eta
+        if sigma_1 == 1:
+            u = np.log(c)
+        else:
+            u =  c**(1-sigma_1)/(1-sigma_1)
+        if sigma_2 == 1:
+            u += eta*np.log(1-l)
+        else:
+            u += eta*(1-l)**(1-sigma_2)/(1-sigma_2)
+        return u
+
+    @staticmethod
+    def uc(c,l,Para):
+        sigma_1 = Para.sigma_1
+        return c**(-sigma_1)
+
+    @staticmethod
+    def ul(c,l,Para):
+        sigma_2 = Para.sigma_2
+        eta = Para.eta
+        return -eta*(1-l)**(-sigma_2)
+
+    @staticmethod
+    def ucc(c,l,Para):
+        return -Para.sigma_1*c**(-Para.sigma_1-1.0)
+
+    @staticmethod
+    def ull(c,l,Para):
+        return -Para.eta*Para.sigma_2*(1-l)**(-Para.sigma_2-1.0)
+
 
 class parameters(object):
 
@@ -56,6 +112,11 @@ class parameters(object):
     nx = 20
 
     cloud = False
+    
+    transfers = False
+
+    def I(self,c,l):
+        return c*self.U.uc(c,l,self)+l*self.U.ul(c,l,self)
 
 
 class DictWrap(object):

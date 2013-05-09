@@ -3,15 +3,27 @@ from scipy.optimize import root
 import numpy as np
 from bellman import ValueFunctionSpline
 from Spline import Spline
+from scipy.optimize import brentq
+import parameters
 
 def computeFB(Para):
     ###FIND FIRST BEST
     S = Para.P.shape[0]
-    def firstBestRoot(c,Para):
-        l = (c+Para.g)/Para.theta
-        return Para.U.uc(c,l,Para)+Para.U.ul(c,l,Para)/Para.theta
 
-    cFB = root(firstBestRoot,0.5*np.ones(S),Para).x
+    #different methods for solving for the FB depending on if we have CES or BGP preferences
+    if Para.U == parameters.UCES_AMSS:
+        def firstBestRoot(c,Para,s):
+            l = (c+Para.g[s])/Para.theta
+            return Para.U.uc(c,l,Para)+Para.U.ul(c,l,Para)/Para.theta
+        cFB = np.zeros(S)
+        for s in range(0,S):
+            cFB[s] = brentq(firstBestRoot,0.01,Para.theta-Para.g[s]-.01,args=(Para,s))
+    else:
+        def firstBestRoot(c,Para):
+            l = (c+Para.g)/Para.theta
+            return Para.U.uc(c,l,Para)+Para.U.ul(c,l,Para)/Para.theta
+        cFB = root(firstBestRoot,0.5*np.ones(S),Para).x
+
     lFB = (cFB+Para.g)/Para.theta
     ucFB = Para.U.uc(cFB,lFB,Para)
     ulFB = Para.U.ul(cFB,lFB,Para)
@@ -20,13 +32,14 @@ def computeFB(Para):
 
     EucFB = Para.P.dot(ucFB)
 
-    xFB = np.kron(IFB,np.ones(S))/(np.kron(ucFB,1/(Para.beta*EucFB))-1) #compute x needed to attain FB while keeping x constant
+    xFB = np.kron(IFB,np.ones(S))/(np.kron(ucFB,1/(EucFB))-np.kron(Para.beta,np.ones(S))) #compute x needed to attain FB while keeping x constant
     return cFB,xFB
 
 
 def setupGrid(Para):
     cFB,xFB = computeFB(Para)
-    Para.xmin = min(xFB) #below xmin FB can be acheived
+    if Para.xmin == None:
+        Para.xmin = min(xFB) #below xmin FB can be acheived
     Para.xgrid = np.linspace(Para.xmin,Para.xmax,Para.nx) #linear grid points
 
     S = Para.P.shape[0]
@@ -48,8 +61,7 @@ def initializeFunctions(Para):
     Q = np.zeros((S*S,S*S)) #full (s_,s) transition matrix
     for s_ in range(0,S):
         for s in range(0,S):
-            Q[s_,s_*S+s] = Para.P[s_,s]
-            Q[S+s_,s_*S+s] = Para.P[s_,s]
+            Q[s_:S*S:S,s_*S+s] = Para.P[s_,s]
     c = np.zeros((Para.nx,S,S))
     xprime = np.zeros((Para.nx,S,S))
     V = np.zeros((Para.nx,S))
@@ -60,18 +72,21 @@ def initializeFunctions(Para):
             x = Para.xgrid[i]
             def stationaryRoot(c):
                 l = (c+Para.g)/Para.theta
-                return c*Para.U.uc(c,l,Para)+l*Para.U.ul(c,l,Para)+(1.0-ucFB/(Para.beta*EucFB[s_]))*x
+                return c*Para.U.uc(c,l,Para)+l*Para.U.ul(c,l,Para)+(Para.beta-ucFB/(EucFB[s_]))*x
             c[i,s_,:] = root(stationaryRoot,cFB).x #find root that holds x constant
             xprime[i,:] = x*np.ones(S)
-            for s in range(0,S):
-                c[i,s_,s] = min(c[i,s_,s],cFB[s])#if you can achieve FB do it
-                l = (c[i,s_,s]+Para.g[s])/Para.theta
-                u[s_,s] = Para.U.u(c[i,s_,s],l,Para)
-                #Compute xprime from implementability constraint
-                xprime[i,s_,s] = (c[i,s_,s]*Para.U.uc(c[i,s_,s],l,Para)+l*Para.U.ul(c[i,s_,s],l,Para)+x)*Para.beta*EucFB[s_]/ucFB[s]
+            if Para.transfers:
+                for s in range(0,S):
+                    c[i,s_,s] = min(c[i,s_,s],cFB[s])#if you can achieve FB do it
+                    #Compute xprime from implementability constraint
+                    l = (c[i,s_,s]+Para.g[s])/Para.theta
+                    xprime[i,s_,s] = (c[i,s_,s]*Para.U.uc(c[i,s_,s],l,Para)+l*Para.U.ul(c[i,s_,s],l,Para)-x*ucFB[s]/EucFB[s_])/Para.beta
+            l = (c[i,s_,:]+Para.g)/Para.theta
+            u[s_,:] = Para.U.u(c[i,s_,:],l,Para)
         for s_ in range(0,S):
+            beta = (Para.P[s_,:]*Para.beta).sum()
             #compute Value using transition matricies.  Gives rough guess on value function
-            v = np.linalg.solve(np.eye(S*S) - Para.beta*Q,u.reshape(S*S))
+            v = np.linalg.solve(np.eye(S*S) - beta*Q,u.reshape(S*S))
             V[i,s_] = Para.P[s_,:].dot(v[s_*S:(s_+1)*S])
 
     #Fit functions using splines.  Linear for policies as they can be wonky
@@ -79,7 +94,8 @@ def initializeFunctions(Para):
     c_policy = {}
     xprime_policy = {}
     for s_ in range(0,S):
-        Vf.append(ValueFunctionSpline(Para.xgrid,V[:,s_],[2],Para.sigma,Para.beta))
+        beta = (Para.P[s_,:]*Para.beta).sum()
+        Vf.append(ValueFunctionSpline(Para.xgrid,V[:,s_],[2],Para.sigma,beta))
         for s in range(0,S):
             c_policy[(s_,s)] = Spline(Para.xgrid,c[:,s_,s],[1])
             xprime_policy[(s_,s)] = Spline(Para.xgrid,xprime[:,s_,s],[1])

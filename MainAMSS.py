@@ -1,46 +1,53 @@
 __author__ = 'dgevans'
 from parameters import parameters
+from parameters import UCES_AMSS
 import numpy as np
 import bellman
 import initialize
-import LucasStockey as LS
-from parameters import UCES_AMSS
-from parameters import UQL
+from scipy.stats import norm
 
-    
-
-
-def compareI(x,c_policy,Para):
-    cLS,lLS,ILS = LS.solveLucasStockey_alt(x,Para)
-    cSB = np.zeros(S)
-    for s in range(0,S):
-        cSB[s] = c_policy[(0,s)](x)
-    lSB = (cSB+Para.g)/Para.theta
-    ISB =  Para.I(cSB,lSB)
-    return ILS-ISB
 
 Para = parameters()
-Para.g = [.15,.17]
-S = len(Para.g)
-Para.P = np.ones((S,S))/S
-#Para.U = UCES_AMSS
-#Para.P = np.array([[.6,.4],[.4,.6]])
-Para.beta = np.array([.93,.97])
-Para.sigma = 1
-Para.sigma_1 = 1
-Para.sigma_2 = 1
-Para.eta = 2.258
-Para.nx = 200
+#Calibrate to AMSS
+gmin = -2.0/10
+gmax = 2.0/10
+S = 10
+gGauss = np.linspace(gmin,gmax,S)
+Para.U = UCES_AMSS
+cdf = norm.cdf(np.linspace(-2.0,2.0,S))
+cdf[S-1] = 1.0
+PGauss = np.ones((S,S))
+PGauss[:,0] = cdf[0]
+for s in range(1,S):
+    PGauss[:,s] = cdf[s]-cdf[s-1]
+
+PWar = np.array([[.9,.1],[0.3,.7]])
+gWar = np.array([30,42.5])
+Para.P = np.kron(PWar,PGauss)
+Para.S = Para.P.shape[0]
+Para.g = np.array(list(gGauss+gWar[0])+list(gGauss+gWar[1]))
+#Para.P = PWar
+#Para.g = gWar
+#Para.S = 2
+Para.beta = .95
+Para.xmax = 100
+Para.sigma_1 = 0.5
+Para.sigma_2 = 2.0
+Para.sigma = Para.sigma_1
+Para.theta = 100.0
+Para.eta = 100.0**(1-Para.sigma_2)
+Para.nx = 100
+
+
+
 S = Para.P.shape[0]
-Para.xmax = 3.0
-Para.xmin = -2.0
-Para.transfers = False
 
 
 ##Setup grid and initialize value function
 #Setup
 Para = initialize.setupGrid(Para)
-Para.bounds = [(0,10)]*S+[(Para.xmin,Para.xmax)]*S
+
+Para.bounds = zip([0]*S,Para.theta-Para.g)+[(Para.xmin,Para.xmax)]*S
 Vf,c_policy,xprime_policy = initialize.initializeFunctions(Para)
 
 #Iterate until convergence
@@ -48,7 +55,7 @@ coef_old = np.zeros((Para.nx,S))
 for s in range(0,S):
     coef_old[:,s] = Vf[s].getCoeffs()
 
-Nmax = 200
+Nmax = 150
 
 diff = []
 for i in range(0,Nmax):
@@ -60,7 +67,6 @@ for i in range(0,Nmax):
     print diff[i]
 
 #Now fit accurate Policy functions
-nx = min(Para.nx*10,1000)
+nx = max(min(Para.nx*10,1000),1000)
 xgrid = np.linspace(Para.xmin,Para.xmax,nx)
 c_policy,xprime_policy = bellman.fitNewPolicies(xgrid,Vf,c_policy,xprime_policy,Para)
-

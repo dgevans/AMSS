@@ -8,6 +8,7 @@ import multiprocessing
 from multiprocessing import Pool
 from functools import partial
 import itertools
+from mpi4py import MPI
 
 #Holds value function truly it actually fits the certain consumption equivalent as that will be closer to linear
 class ValueFunctionSpline:
@@ -45,7 +46,7 @@ class ValueFunctionSpline:
 #for a given state x and s_ solves value function problem. returns polcies and objective
 def findPolicies(x_s_,Vf,c_policy,xprime_policy,Para):
     S = Para.P.shape[0]
-    bounds = [(0,10)]*S+[(Para.xmin,Para.xmax)]*S
+    bounds = Para.bounds
     x = x_s_[0]
     s_ = x_s_[1]
     state = DictWrap({'x': x,'s':s_})
@@ -53,7 +54,10 @@ def findPolicies(x_s_,Vf,c_policy,xprime_policy,Para):
     for s in range(0,S):
         z0[s] = c_policy[(s_,s)](x)
         z0[S+s] = xprime_policy[(s_,s)](x)
-    (policy,minusv,_,imode,smode) = fmin_slsqp(objectiveFunction,z0,f_ieqcons=impCon,bounds=bounds,fprime=objectiveFunctionJac,fprime_ieqcons=impConJac,args=(Vf,Para,state),iprint=False,full_output=True,acc=1e-10,iter=10000)
+    if Para.transfers == False:
+        (policy,minusv,_,imode,smode) = fmin_slsqp(objectiveFunction,z0,f_eqcons=impCon,bounds=bounds,fprime=objectiveFunctionJac,fprime_eqcons=impConJac,args=(Vf,Para,state),iprint=False,full_output=True,acc=1e-8,iter=1000)
+    else:
+        (policy,minusv,_,imode,smode) = fmin_slsqp(objectiveFunction,z0,f_ieqcons=impCon,bounds=bounds,fprime=objectiveFunctionJac,fprime_ieqcons=impConJac,args=(Vf,Para,state),iprint=False,full_output=True,acc=1e-8,iter=1000)
     if imode != 0:
         raise Exception(smode)
     return policy[0:S],policy[S:2*S],-minusv
@@ -77,8 +81,7 @@ def iterateBellmanLocally(Vf,c_policy,xprime_policy,Para):
     """
      Iterates the bellman equation locally returns policy function Vf,c_policy,xprime_policy
     """
-    S = Para.P.shape[0]
-    policies = findPoliciesOnGrid(Para.domain,Vf,c_policy,xprime_policy,Para)
+    policies = findPoliciesOnGrid(Para.domain,Vf,c_policy,xprime_policy,Para,ncpu=1)
 
     return fitPolicies(policies,Vf,c_policy,xprime_policy,Para)
 
@@ -97,6 +100,31 @@ def iterateBellmanOnCloud(Vf,c_policy,xprime_policy,Para,nCloud = 10):
     policies = list(itertools.chain.from_iterable(chunked_policies)) #collapse polcies into one list
 
     return fitPolicies(policies,Vf,c_policy,xprime_policy,Para) #fit policy functions from policy list
+
+def iterateBellmanMPI(Vf,c_policy,xprime_policy,Para):
+
+    w = MPI.COMM_WORLD
+    s = w.Get_size()
+    rank = w.Get_rank()
+    n = len(Para.domain)
+    m = n/s
+    r = n%s
+
+
+    mydomain = Para.domain[rank*m+min(rank,r):(rank+1)*m+min(rank+1,r)]
+    findPolicies_partial = partial(findPolicies,Vf=Vf,c_policy=c_policy,xprime_policy=xprime_policy,Para=Para)
+    mypolicies = map(findPolicies_partial,mydomain)
+
+    chunked_policies = w.gather(mypolicies,root=0) #gather all the policies at master
+    if rank == 0:
+        policies = list(itertools.chain.from_iterable(chunked_policies))
+        policyFunctions = fitPolicies(policies,Vf,c_policy,xprime_policy,Para) #have master fit policy functions
+    else:
+        policyFunctions = []
+
+    return w.bcast(policyFunctions,root=0) #send the fit back to rest of group
+
+
 
 def fitPolicies(policies,Vf,c_policy,xprime_policy,Para):
     """
@@ -172,7 +200,7 @@ def impCon(z,V,Para,state):
 
     Euc = np.dot(P[s_,:],uc)
 
-    return c*uc + l*ul + xprime - x*uc/(beta*Euc)
+    return c*uc + l*ul + beta*xprime - x*uc/(Euc)
 
 def impConJac(z,V,Para,state):
     """
@@ -194,9 +222,9 @@ def impConJac(z,V,Para,state):
     Euc = np.dot(P[s_,:],uc)
 
     JacI = np.diag( uc+ucc*c+(ul+ull*l)/theta ) #derivative of I = uc*c+ul*l w.r.t c
-    JacXprime = np.eye(S)  #derivative of xprime w.r.t xprime
+    JacXprime = np.diag(beta*np.ones(S))  #derivative of xprime w.r.t xprime
     #derivative of -x*uc/(beta Euc) w.r.t. c
-    JacXterm = np.diag(-x*ucc/(beta*Euc)) + x*np.kron(uc.reshape(S,1),P[s_,:]*ucc.reshape(1,S))/(beta*Euc**2)
+    JacXterm = np.diag(-x*ucc/(Euc)) + x*np.kron(uc.reshape(S,1),P[s_,:]*ucc.reshape(1,S))/(Euc**2)
     return np.hstack((JacI+JacXterm #derivative w.r.t c
                       ,JacXprime)) #derivative w.r.t xprime
 
@@ -226,12 +254,12 @@ def fitNewPolicies(xgrid,Vf,c_policy,xprime_policy,Para):
     Fits new policies locally on a larger xgrid
     """
     S = Para.P.shape[0]
+    Para.xgrid = xgrid
     Para.nx = xgrid.shape[0]
     xDomain = np.kron(np.ones(S),Para.xgrid) #stack Para.xgrid S times
     s_Domain = np.kron(range(0,S),np.ones(Para.nx,dtype=np.int)) #s assciated with each grid
     Para.domain = zip(xDomain,s_Domain)#zip them together so we have something that looks like
-
-    c_policy,xprime_policy,_ =iterateBellmanLocally(Vf,c_policy,xprime_policy,Para)
+    _,c_policy,xprime_policy =iterateBellmanLocally(Vf,c_policy,xprime_policy,Para)
     return c_policy,xprime_policy
 
 
