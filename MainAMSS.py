@@ -29,14 +29,15 @@ Para.g = np.array(list(gGauss+gWar[0])+list(gGauss+gWar[1]))
 #Para.P = PWar
 #Para.g = gWar
 #Para.S = 2
-Para.beta = .95
-Para.xmax = 100
+Para.beta = np.array([.95])
+Para.xmax = 40
 Para.sigma_1 = 0.5
 Para.sigma_2 = 2.0
 Para.sigma = Para.sigma_1
 Para.theta = 100.0
 Para.eta = 100.0**(1-Para.sigma_2)
-Para.nx = 100
+Para.nx = 40
+Para.xmin = None
 
 
 
@@ -59,7 +60,7 @@ Nmax = 150
 
 diff = []
 for i in range(0,Nmax):
-    Vf,c_policy,xprime_policy = bellman.iterateBellmanLocally(Vf,c_policy,xprime_policy,Para)
+    Vf,c_policy,xprime_policy = bellman.iterateBellmanMPI(Vf,c_policy,xprime_policy,Para)
     diff.append(0)
     for s_ in range(0,S):
         diff[i] = max(diff[i],np.max(np.abs(coef_old[:,s_]-Vf[s_].getCoeffs())))

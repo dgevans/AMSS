@@ -3,12 +3,12 @@ import numpy as np
 from Spline import Spline
 from scipy.optimize import fmin_slsqp
 from parameters import DictWrap
-import cloud
 import multiprocessing
 from multiprocessing import Pool
 from functools import partial
 import itertools
 from mpi4py import MPI
+import sys
 
 #Holds value function truly it actually fits the certain consumption equivalent as that will be closer to linear
 class ValueFunctionSpline:
@@ -110,7 +110,8 @@ def iterateBellmanMPI(Vf,c_policy,xprime_policy,Para):
     m = n/s
     r = n%s
 
-
+    print "iterating bellman"
+    sys.stdout.flush()
     mydomain = Para.domain[rank*m+min(rank,r):(rank+1)*m+min(rank+1,r)]
     findPolicies_partial = partial(findPolicies,Vf=Vf,c_policy=c_policy,xprime_policy=xprime_policy,Para=Para)
     mypolicies = map(findPolicies_partial,mydomain)
