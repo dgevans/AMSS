@@ -5,8 +5,12 @@ import numpy as np
 import bellman
 import initialize
 from scipy.stats import norm
+import sys
+from mpi4py import MPI
+import cPickle
 
-
+rank = MPI.COMM_WORLD.Get_rank()
+print rank
 Para = parameters()
 #Calibrate to AMSS
 gmin = -2.0/10
@@ -59,15 +63,28 @@ for s in range(0,S):
 Nmax = 150
 
 diff = []
+print "iterating bellman"
+sys.stdout.flush()
 for i in range(0,Nmax):
     Vf,c_policy,xprime_policy = bellman.iterateBellmanMPI(Vf,c_policy,xprime_policy,Para)
     diff.append(0)
     for s_ in range(0,S):
         diff[i] = max(diff[i],np.max(np.abs(coef_old[:,s_]-Vf[s_].getCoeffs())))
         coef_old[:,s_] = Vf[s_].getCoeffs()
-    print diff[i]
+    if rank == 0:
+        print diff[i]
+        sys.stdout.flush()
 
 #Now fit accurate Policy functions
+if rank ==0:
+    fout = file('AMSSpolicyCourse.dat')
+    cPickle.dump((Vf,c_policy,xprime_policy,Para),fout)
+    fout.close()
 nx = max(min(Para.nx*10,1000),1000)
 xgrid = np.linspace(Para.xmin,Para.xmax,nx)
 c_policy,xprime_policy = bellman.fitNewPolicies(xgrid,Vf,c_policy,xprime_policy,Para)
+if rank ==0:
+    fout = file('AMSSpolicy.dat')
+    cPickle.dump((Vf,c_policy,xprime_policy,Para,xgrid),fout)
+    fout.close()
+    

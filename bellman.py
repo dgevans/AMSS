@@ -110,8 +110,6 @@ def iterateBellmanMPI(Vf,c_policy,xprime_policy,Para):
     m = n/s
     r = n%s
 
-    print "iterating bellman"
-    sys.stdout.flush()
     mydomain = Para.domain[rank*m+min(rank,r):(rank+1)*m+min(rank+1,r)]
     findPolicies_partial = partial(findPolicies,Vf=Vf,c_policy=c_policy,xprime_policy=xprime_policy,Para=Para)
     mypolicies = map(findPolicies_partial,mydomain)
@@ -260,7 +258,9 @@ def fitNewPolicies(xgrid,Vf,c_policy,xprime_policy,Para):
     xDomain = np.kron(np.ones(S),Para.xgrid) #stack Para.xgrid S times
     s_Domain = np.kron(range(0,S),np.ones(Para.nx,dtype=np.int)) #s assciated with each grid
     Para.domain = zip(xDomain,s_Domain)#zip them together so we have something that looks like
-    _,c_policy,xprime_policy =iterateBellmanLocally(Vf,c_policy,xprime_policy,Para)
+    _,c_policy,xprime_policy =iterateBellmanMPI(Vf,c_policy,xprime_policy,Para)
     return c_policy,xprime_policy
+    
+
 
 
