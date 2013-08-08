@@ -9,7 +9,8 @@ import sys
 from mpi4py import MPI
 import cPickle
 
-rank = MPI.COMM_WORLD.Get_rank()
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
 print rank
 Para = parameters()
 #Calibrate to AMSS
@@ -50,16 +51,25 @@ S = Para.P.shape[0]
 
 ##Setup grid and initialize value function
 #Setup
-Para = initialize.setupGrid(Para)
+if rank == 0:
+    print "Initializing policies"
+    Para = initialize.setupGrid(Para)
+    
+    Para.bounds = zip([0]*S,Para.theta-Para.g)+[(Para.xmin,Para.xmax)]*S
+    Vf,c_policy,xprime_policy = initialize.initializeFunctions(Para)
+    policies = Vf,c_policy,xprime_policy,Para
+    print "sending policies"
+else:
+    policies = []
 
-Para.bounds = zip([0]*S,Para.theta-Para.g)+[(Para.xmin,Para.xmax)]*S
-Vf,c_policy,xprime_policy = initialize.initializeFunctions(Para)
+
+Vf,c_policy,xprime_policy = comm.bcast(policies)    
 
 #Iterate until convergence
 coef_old = np.zeros((Para.nx,S))
 for s in range(0,S):
     coef_old[:,s] = Vf[s].getCoeffs()
-
+    
 Nmax = 150
 
 diff = []
@@ -74,6 +84,7 @@ for i in range(0,Nmax):
     if rank == 0:
         print diff[i]
         sys.stdout.flush()
+        
 
 #Now fit accurate Policy functions
 if rank ==0:
