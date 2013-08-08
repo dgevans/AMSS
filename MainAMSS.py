@@ -53,17 +53,19 @@ S = Para.P.shape[0]
 #Setup
 if rank == 0:
     print "Initializing policies"
+    sys.stdout.flush()
     Para = initialize.setupGrid(Para)
     
     Para.bounds = zip([0]*S,Para.theta-Para.g)+[(Para.xmin,Para.xmax)]*S
     Vf,c_policy,xprime_policy = initialize.initializeFunctions(Para)
     policies = Vf,c_policy,xprime_policy,Para
     print "sending policies"
+    sys.stdout.flush()
 else:
     policies = []
 
 
-Vf,c_policy,xprime_policy = comm.bcast(policies)    
+Vf,c_policy,xprime_policy,Para = comm.bcast(policies)    
 
 #Iterate until convergence
 coef_old = np.zeros((Para.nx,S))
