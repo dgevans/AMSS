@@ -14,8 +14,8 @@ rank = comm.Get_rank()
 print rank
 Para = parameters()
 #Calibrate to AMSS
-gmin = -2.0/10
-gmax = 2.0/10
+gmin = -2.0/0.4
+gmax = 2.0/0.4
 S = 10
 gGauss = np.linspace(gmin,gmax,S)
 Para.U = UCES_AMSS
@@ -35,15 +35,15 @@ Para.g = np.array(list(gGauss+gWar[0])+list(gGauss+gWar[1]))
 #Para.g = gWar
 #Para.S = 2
 Para.beta = np.array([.95])
-Para.xmax = 40
+Para.xmax = 25.
 Para.sigma_1 = 0.5
 Para.sigma_2 = 2.0
 Para.sigma = Para.sigma_1
 Para.theta = 100.0
 Para.eta = 100.0**(1-Para.sigma_2)
 Para.nx = 40
-Para.xmin = None
-
+Para.xmin= -100.
+Para.transfers = True
 
 
 S = Para.P.shape[0]
@@ -62,6 +62,8 @@ if rank == 0:
     print "sending policies"
     sys.stdout.flush()
 else:
+    import time
+    time.sleep(20)
     policies = []
 
 
