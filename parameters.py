@@ -114,6 +114,8 @@ class parameters(object):
     cloud = False
     
     transfers = False
+    
+    port = None
 
     def I(self,c,l):
         return c*self.U.uc(c,l,self)+l*self.U.ul(c,l,self)

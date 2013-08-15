@@ -44,21 +44,23 @@ class ValueFunctionSpline:
 
 
 #for a given state x and s_ solves value function problem. returns polcies and objective
-def findPolicies(x_s_,Vf,c_policy,xprime_policy,Para):
+def findPolicies(x_s_,Vf,c_policy,xprime_policy,Para,z0=None):
     S = Para.P.shape[0]
     bounds = Para.bounds
     x = x_s_[0]
     s_ = x_s_[1]
     state = DictWrap({'x': x,'s':s_})
-    z0 = np.zeros(2*S)
-    for s in range(0,S):
-        z0[s] = c_policy[(s_,s)](x)
-        z0[S+s] = xprime_policy[(s_,s)](x)
+    if z0 ==None:
+        z0 = np.zeros(2*S)
+        for s in range(0,S):
+            z0[s] = c_policy[(s_,s)](x)
+            z0[S+s] = xprime_policy[(s_,s)](x)
     if Para.transfers == False:
         (policy,minusv,_,imode,smode) = fmin_slsqp(objectiveFunction,z0,f_eqcons=impCon,bounds=bounds,fprime=objectiveFunctionJac,fprime_eqcons=impConJac,args=(Vf,Para,state),iprint=False,full_output=True,acc=1e-8,iter=1000)
     else:
         (policy,minusv,_,imode,smode) = fmin_slsqp(objectiveFunction,z0,f_ieqcons=impCon,bounds=bounds,fprime=objectiveFunctionJac,fprime_ieqcons=impConJac,args=(Vf,Para,state),iprint=False,full_output=True,acc=1e-8,iter=1000)
     if imode != 0:
+        print x_s_
         raise Exception(smode)
     return policy[0:S],policy[S:2*S],-minusv
 
@@ -188,6 +190,10 @@ def impCon(z,V,Para,state):
     s_ = state.s
     P = Para.P
     S = Para.P.shape[0]
+    if Para.port == None:
+        p = np.ones(S)
+    else:
+        p = Para.port
     beta = Para.beta
 
     c = z[0:S]
@@ -197,9 +203,9 @@ def impCon(z,V,Para,state):
     ul = Para.U.ul(c,l,Para)
 
 
-    Euc = np.dot(P[s_,:],uc)
+    Euc = np.dot(P[s_,:],uc*p)
 
-    return c*uc + l*ul + beta*xprime - x*uc/(Euc)
+    return c*uc + l*ul + beta*xprime - x*uc*p/(Euc)
 
 def impConJac(z,V,Para,state):
     """
@@ -209,6 +215,10 @@ def impConJac(z,V,Para,state):
     s_ = state.s
     P = Para.P
     S = Para.P.shape[0]
+    if Para.port == None:
+        p = np.ones(S)
+    else:
+        p = Para.port
     beta = Para.beta
     theta = Para.theta
 
@@ -218,12 +228,12 @@ def impConJac(z,V,Para,state):
     ul = Para.U.ul(c,l,Para)
     ucc = Para.U.ucc(c,l,Para)
     ull = Para.U.ull(c,l,Para)
-    Euc = np.dot(P[s_,:],uc)
+    Euc = np.dot(P[s_,:],uc*p)
 
     JacI = np.diag( uc+ucc*c+(ul+ull*l)/theta ) #derivative of I = uc*c+ul*l w.r.t c
     JacXprime = np.diag(beta*np.ones(S))  #derivative of xprime w.r.t xprime
     #derivative of -x*uc/(beta Euc) w.r.t. c
-    JacXterm = np.diag(-x*ucc/(Euc)) + x*np.kron(uc.reshape(S,1),P[s_,:]*ucc.reshape(1,S))/(Euc**2)
+    JacXterm = np.diag(-x*ucc*p/(Euc)) + x*np.kron((uc*p).reshape(S,1),P[s_,:]*(ucc*p).reshape(1,S))/(Euc**2)
     return np.hstack((JacI+JacXterm #derivative w.r.t c
                       ,JacXprime)) #derivative w.r.t xprime
 

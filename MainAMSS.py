@@ -42,7 +42,7 @@ Para.sigma = Para.sigma_1
 Para.theta = 100.0
 Para.eta = 100.0**(1-Para.sigma_2)
 Para.nx = 40
-Para.xmin= -100.
+Para.xmin= -90.
 Para.transfers = True
 
 
@@ -92,14 +92,14 @@ for i in range(0,Nmax):
 
 #Now fit accurate Policy functions
 if rank ==0:
-    fout = file('AMSSpolicyCourse.dat')
+    fout = open('AMSSpolicyCourse.dat','w')
     cPickle.dump((Vf,c_policy,xprime_policy,Para),fout)
     fout.close()
 nx = max(min(Para.nx*10,1000),1000)
 xgrid = np.linspace(Para.xmin,Para.xmax,nx)
 c_policy,xprime_policy = bellman.fitNewPolicies(xgrid,Vf,c_policy,xprime_policy,Para)
 if rank ==0:
-    fout = file('AMSSpolicy.dat')
+    fout = open('AMSSpolicy.dat','w')
     cPickle.dump((Vf,c_policy,xprime_policy,Para,xgrid),fout)
     fout.close()
     
