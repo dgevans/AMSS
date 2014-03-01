@@ -34,12 +34,11 @@ p = np.array([1.05,1.02,0.95])
 
 muGrid = np.linspace(-0.4,0.,40)
 PI.setupDomain(Para,muGrid)
+ErgodicDistribution.CompareToLinearizationPers(Para,p)
 
 
 
-
-
-
+'''
 port = LS.getPortfolio(1.1/Para.beta,Para)
 port = port / Para.P[0,:].dot(port)
 Para.port = copy(port)
@@ -77,6 +76,7 @@ simHists = []
 for PF in PFs:
     np.random.seed(125232)
     simHists.append(PI.simulate(mubar,50000,PF,Para))
+'''
 '''
 dists = []
 PFs = []
