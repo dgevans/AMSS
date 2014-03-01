@@ -102,6 +102,15 @@ def solveLucasStockey(x,s_,Para):
     mu_SL = root(lambda mu: x_mu(mu)-x,0).x
 
     return solveLSmu(mu_SL,Para)
+    
+def solveForLSmu(x,s_,Para):
+    S = Para.P.shape[0]
+    def x_mu(mu):
+        c,l = solveLSmu(mu,Para)
+        I = c*Para.U.uc(c,l,Para)+l*Para.U.ul(c,l,Para)
+        return Para.P[s_,:].dot(np.linalg.solve(np.eye(S)-(Para.beta*Para.P.T).T,I))
+
+    return root(lambda mu: x_mu(mu)-x,0).x
 
 def solveLucasStockey_alt(x,Para):
     S = Para.P.shape[0]
@@ -173,3 +182,18 @@ def getPortfolio(x,Para):
         return aprime/np.linalg.norm(aprime)
     else:
         return -aprime/np.linalg.norm(aprime)
+        
+def CMPolicy(state,Para):
+    '''
+    Computes the complete markets policy
+    '''
+    mu,s_ = state
+    c,l = solveLSmu(mu,Para)
+    Uc = Para.U.uc(c,l,Para)
+    Ucc = Para.U.ucc(c,l,Para)
+    I = Para.I(c,l)
+    P = Para.P
+    S = len(P)
+    x = Para.beta*Para.P[s_,:].dot(np.linalg.solve(np.eye(S)-Para.beta*P,I))
+    xi = Uc-mu*( Ucc*c+Uc )
+    return np.hstack((c,l,mu*np.ones(S),xi,x))
