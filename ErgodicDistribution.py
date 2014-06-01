@@ -138,7 +138,7 @@ class distribution(object):
             mugrid = (self.muGrid[s][:-1]+self.muGrid[s][1:])/2
             mupdf = self.mupdf[s]/np.abs((self.muGrid[s][1:]-self.muGrid[s][:-1]))
             bGrid.append(bf[s](mugrid))
-            pdf.append(mupdf/np.abs(bf[s](mugrid,1)))
+            pdf.append(mupdf/np.abs(bf[s](mugrid)))
         return bGrid,pdf
                 
         
