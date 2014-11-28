@@ -100,7 +100,18 @@ def solveLucasStockey(x,s_,Para):
         return Para.P[s_,:].dot(np.linalg.solve(np.eye(S)-(Para.beta*Para.P.T).T,I))
 
     mu_SL = root(lambda mu: x_mu(mu)-x,0).x
+    return solveLSmu(mu_SL,Para)
+    
+def solveLucasStockey_withTransfers(x,s_,Para):
+    S = Para.P.shape[0]
+    def x_mu(mu):
+        c,l = solveLSmu(mu,Para)
+        I = c*Para.U.uc(c,l,Para)+l*Para.U.ul(c,l,Para)
+        return Para.P[s_,:].dot(np.linalg.solve(np.eye(S)-(Para.beta*Para.P.T).T,I))
 
+    mu_SL = root(lambda mu: x_mu(mu)-x,0).x
+    if mu_SL < 0.:
+        mu_SL = 0.
     return solveLSmu(mu_SL,Para)
     
 def solveForLSmu(x,s_,Para):

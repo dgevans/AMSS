@@ -7,6 +7,9 @@ Created on Wed Nov 13 16:56:45 2013
 from numpy import *
 from scipy.optimize import root
 from Spline import Spline
+from scipy.interpolate import interp1d
+
+k = 'linear'
 
 class PolicyMap(object):
     '''
@@ -85,6 +88,57 @@ class PolicyMap(object):
         res[4*S] = mu_tilde - EpUcMu/EpUc
         return res
         
+        
+class time0Problem(object):
+    '''
+    Solves the time 0 problem
+    '''
+    def __init__(self,Para,PF,mu_bounds):
+        '''
+        Stores Para and policy rules
+        '''
+        self.Para = Para
+        self.PF = PF
+        self.mubar_l,self.mubar_h = mu_bounds
+        
+    def __residuals(self,state,z):
+        '''
+        Residuals given the state and policies z
+        '''
+        cf,lf,muprimef,xif,xf = self.PF
+        b0,s0 = state
+        c,l,mu,xi = z
+        Para = self.Para
+        
+        theta = Para.theta
+        g = Para.g
+        
+        mu = min(max(mu,self.mubar_l),self.mubar_h)        
+        
+        x = xf[s0](mu)        
+        
+        Uc = Para.U.uc(c,l,Para)
+        Ucc = Para.U.ucc(c,l,Para)
+        Ul = Para.U.ul(c,l,Para)
+        Ull = Para.U.ull(c,l,Para)
+        
+        res = zeros(4)
+        res[0] = Uc*b0 - Uc*c - Ul*l - x
+        res[1] = (Para.theta*l - c - g)[s0]
+        res[2] = Uc - mu*(Ucc*(c-b0) + Uc) - xi
+        res[3] = (Ul - mu*(Ull*l + Ul) + theta*xi + 0*g)[s0]
+        return res
+        
+    def __call__(self,state):
+        '''
+        Finds the optimal policy rules at b0,s
+        '''
+        res = root(lambda z: self.__residuals(state,z),array([1.,0.5,-0.02,1.]))
+        if not res.success:
+            raise "could not find root"
+        else:
+            return res.x
+        
 def setupDomain(Para,mugrid):
     '''
     Creates the domain on which the functions are approximated
@@ -150,9 +204,16 @@ def simulate(mu0,T,PF,Para):
     S = Para.P.shape[0]
     muHist = zeros(T)
     xHist = zeros(T)
+    bHist = zeros(T)
+    tauHist = zeros(T)
     sHist = zeros(T,dtype=int)
     muHist[0] = mu0
+    c = cf[0,0](mu0)
+    l = lf[0,0](mu0)
+    tauHist[0] = 1 + Para.U.ul(c,l,Para)/(Para.theta*Para.U.uc(c,l,Para))
     xHist[0] = xf[sHist[0]](muHist[0])
+    bHist[0] = xHist[0]/Para.U.uc(c,l,Para)
+    
     cumP = cumsum(Para.P,axis=1)
     mu_l = amin(Para.domain[0])
     mu_h = amax(Para.domain[0])
@@ -164,9 +225,13 @@ def simulate(mu0,T,PF,Para):
                 sHist[t] = s
                 break
         muprime = muprimef[(s_,s)](muHist[t-1])
+        c = cf[s_,s](muHist[t-1])
+        l = lf[s_,s](muHist[t-1])
+        tauHist[t] = 1 + Para.U.ul(c,l,Para)/(Para.theta*Para.U.uc(c,l,Para))
         muHist[t] = min(max(muprime,mu_l),mu_h)
         xHist[t] = xf[s](muHist[t])
-    return muHist,xHist,sHist
+        bHist[t] = xHist[t]/Para.U.uc(c,l,Para)
+    return muHist,xHist,sHist,bHist,tauHist
     
 def conditionalExpectations(muprimef,T,Para):
     '''

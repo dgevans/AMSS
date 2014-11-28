@@ -43,7 +43,7 @@ def dI(Para,mu):
     '''
     gamma = Para.gamma
     tau = Tau(Para,mu)
-    return ((1-gamma)/gamma) * ( 1-(1+gamma)*tau/gamma ) *dTau(Para,mu)
+    return (1-tau)**((1-gamma)/gamma) * ( 1-(1+gamma)*tau/gamma ) *dTau(Para,mu)
 
 def d2I(Para,mu):
     '''
@@ -196,3 +196,26 @@ def getErgodic(Para,SS,port):
     var_z = (zbar**2*var_B + 2*cov_BC*zbar+var_C)/(1-Bbar**2+var_B)
     return zbar,var_z
     
+def linAnmolPers(Para,mubar):
+    '''
+    Linearize around 1/|S| case with persistance
+    '''
+    beta = Para.beta    
+    S = len(Para.g)
+    P = np.ones(S)/S    
+    
+    Para.P = np.ones((S,S))/S
+    bbar,pbar = getSteadyState(Para,mubar)
+    db_dmu,dmuprime_dmu,db_dp,dmuprime_dp = Linearize(Para,(mubar,bbar,pbar))[:4]
+    
+    f = dI(Para,mubar) + db_dmu
+    
+    Epbar2 = P.dot(pbar**2)    
+    
+    db_dalpha = -beta*mubar*f*(S/(S-1))/Epbar2* ( pbar -1 + beta*(Epbar2-1)/(Epbar2-beta))
+    
+    db_dalphaT = db_dalpha.reshape((-1,1))
+    
+    dmuprime_dalpha = (db_dalphaT*pbar/beta - db_dalpha)/f
+    
+    return db_dalpha,dmuprime_dalpha

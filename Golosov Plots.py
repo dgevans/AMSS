@@ -10,56 +10,77 @@ from parameters import parameters
 import numpy as np
 import LucasStockey as LS
 from parameters import UQL
+from parameters import UCES
 import policy_iteration as PI
 import ErgodicDistribution
 from copy import copy
 import matplotlib.pyplot as plt
 import linearization as  LI
 from scipy.optimize import root
+import pandas as pd
 
 Para = parameters()
-Para.g = np.array([0.1,0.15,0.2])
+Para.g = np.array([0.15,0.17,0.19])
 Para.theta = 1.
 Para.P = np.ones((3,3))/3
-p = np.array([1.05,1.02,0.95])
-
 S = len(Para.P)
-#Para.P = np.array([[0.8,0.1,0.1],[0.1,0.8,0.1],[0.1,0.1,0.8]])
 Para.U = UQL
-#Para.P = np.array([[.6,.4],[.4,.6]])
 Para.beta = np.array([.95])
+bbar,pbar = LI.getSteadyState(Para,-.2)
+phat = np.array([0.98,1.,0.98])
 
-mubar = root(lambda mu: LI.getSteadyState(Para,mu)[0]-1.,-0.3).x
-
-muGrid = np.sort(np.hstack([np.linspace(-0.6,0.,60),mubar]))
+muGrid = np.linspace(-0.4,0.,40)
 PI.setupDomain(Para,muGrid)
 
 
-Para.port = LI.getSteadyState(Para,mubar)[1]
-FCM = lambda state: LS.CMPolicy(state,Para)
+FCM = lambda state : LS.CMPolicy(state,Para)
 PF = PI.fitPolicyFunction(Para,FCM)
-PF = PI.solveInfiniteHorizon(Para,PF)
-cf,lf,muprimef,xif,xf = PF
-mu0 = root(xf[0],-.1).x
-state = np.random.get_state()
-uHist1,xHist1,sHist1,bHist1,tauHist1 = PI.simulate(mu0,5000,PF,Para)
 
-mubar = root(lambda mu: LI.getSteadyState(Para,mu)[0]+1.,0.).x
+b,tau = [],[]
 
-muGrid = np.sort(np.hstack([np.linspace(-0.6,0.,60),mubar]))
+for port,line in zip([pbar,pbar+0.25*(phat-np.mean(phat)),phat],['-k','--k',':k']):
+    Para.port = port
+    PF = PI.solveInfiniteHorizon(Para,PF)
+    muHist,xHist,sHist,bHist,tauHist = PI.simulate(-.1,500000,PF,Para)
+    b.append(pd.Series(bHist[100000:]))
+    tau.append(pd.Series(tauHist[100000:]))
+    plt.subplot(211)
+    b[-1].plot(kind='kde',style=line,grid=False)
+    plt.xlabel('Government Debt')
+    plt.title('Ergodic Distribution')
+    plt.legend(['Perfectly Correlated','Partially Correlated','Uncorrelated'],loc='upper left')
+    plt.ylim([0,4])
+    plt.subplot(212)
+    tau[-1].plot(kind='kde',style=line,grid=False)
+    plt.xlabel('Taxes')
+    plt.ylim([0,40])
+    
+Para.U = UCES
+muGrid = np.linspace(-0.15,0.,40)
 PI.setupDomain(Para,muGrid)
-
-
-Para.port = LI.getSteadyState(Para,mubar)[1]
-FCM = lambda state: LS.CMPolicy(state,Para)
+Para.port = np.ones(3)
+FCM = lambda state : LS.CMPolicy(state,Para)
 PF = PI.fitPolicyFunction(Para,FCM)
-PF = PI.solveInfiniteHorizon(Para,PF)
-cf,lf,muprimef,xif,xf = PF
-mu0 = root(xf[0],-.1).x
-np.random.set_state(state)
-uHist2,xHist2,sHist2,bHist2,tauHist2 = PI.simulate(mu0,5000,PF,Para)
+pbar = np.ones(S)
+pbar2 = np.array([ 1.02668841,  1.00017934,  0.97449364])*.9
 
-
+plt.figure()
+for port,line in zip([pbar,pbar+0.2*(phat-np.mean(phat)),pbar2+(phat-np.mean(phat))],['-k','--k',':k']):
+    Para.port = port
+    PF = PI.solveInfiniteHorizon(Para,PF)
+    muHist,xHist,sHist,bHist,tauHist = PI.simulate(-.1,500000,PF,Para)
+    b.append(pd.Series(bHist[100000:]))
+    tau.append(pd.Series(tauHist[100000:]))
+    plt.subplot(211)
+    b[-1].plot(kind='kde',style=line,grid=False)
+    plt.xlabel('Government Debt')
+    plt.title('Ergodic Distribution')
+    plt.legend(['Perfectly Correlated','Partially Correlated','Uncorrelated'],loc='upper left')
+    plt.ylim([0,4])
+    plt.subplot(212)
+    tau[-1].plot(kind='kde',style=line,grid=False)
+    plt.xlabel('Taxes')
+    plt.ylim([0,40])
 '''
 port = LS.getPortfolio(1.1/Para.beta,Para)
 port = port / Para.P[0,:].dot(port)

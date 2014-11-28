@@ -135,7 +135,7 @@ def fitPolicies(policies,Vf,c_policy,xprime_policy,Para):
     policies = [policies[i:i+Para.nx] for i in range(0,len(policies),Para.nx)] #split policies up into groups by S
     for s_ in range(0,S):
         [c_new,xprime_new,V_new] = zip(*policies[s_]) #unzip the list of tuples into the c,xprime policies and associated values
-        Vf[s_].fit(Para.xgrid,np.hstack(V_new)[:],[2])
+        Vf[s_].fit(Para.xgrid,np.hstack(V_new)[:],[1])
         for s in range(0,S):
             c_policy[(s_,s)].fit(Para.xgrid,np.vstack(c_new)[:,s],[1]) #vstack is used here because c_new is really a list of arrays
             xprime_policy[(s_,s)].fit(Para.xgrid,np.vstack(xprime_new)[:,s],[1])
